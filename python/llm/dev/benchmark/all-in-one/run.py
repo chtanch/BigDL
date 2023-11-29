@@ -359,6 +359,7 @@ def run_transformer_int4_gpu(repo_id,
     result = {}
     with torch.inference_mode():
         for in_out in in_out_pairs:
+            print(f'*******{in_out}')
             try:
                 in_out_len = in_out.split("-")
                 in_len = int(in_out_len[0])
@@ -387,11 +388,13 @@ def run_transformer_int4_gpu(repo_id,
                     output_ids = output_ids.cpu()
                     print("model generate cost: " + str(end - st))
                     output = tokenizer.batch_decode(output_ids)
-                    print(output[0])
+                    print(output[0][:100])
                     actual_out_len = output_ids.shape[1] - actual_in_len
                     if i >= warm_up:
                         result[in_out].append([model.first_cost, model.rest_cost_mean, model.encoder_time,
                                             actual_in_len, actual_out_len])
+            except RuntimeError as error:
+                raise error
             except RuntimeError:
                 pass
     del model
@@ -640,12 +643,28 @@ def run_deepspeed_transformer_int4_cpu(repo_id,
 if __name__ == '__main__':
     from omegaconf import OmegaConf
     conf = OmegaConf.load(f'{current_dir}/config.yaml')
-    today = date.today()
+    import datetime
+    today = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     import pandas as pd
     for api in conf.test_api:
         for model in conf.repo_id:
-            run_model(model, api, conf['in_out_pairs'], conf['local_model_hub'], conf['warm_up'], conf['num_trials'], conf['num_beams'], conf['low_bit'])
+            try:
+                print(f'Running {model}')
+                run_model(model, api, conf['in_out_pairs'], conf['local_model_hub'], conf['warm_up'], conf['num_trials'], conf['num_beams'], conf['low_bit'])
+            except RuntimeError as error:
+                results.append([model,'FAIL','FAIL','FAIL',
+                            conf['in_out_pairs'][0],
+                            'FAIL',
+                            conf['num_trials'],
+                            conf['low_bit']])
+                print(f'Runtime error: {error}')
+            except KeyboardInterrupt:
+                pass
+            except Exception as error:
+                print(f'Error: {error}')
+            finally:
+                torch.xpu.empty_cache()
         df = pd.DataFrame(results, columns=['model', '1st token avg latency (ms)', '2+ avg latency (ms/token)', 'encoder time (ms)',
                                             'input/output tokens', 'actual input/output tokens', 'num_beams', 'low_bit'])
 
