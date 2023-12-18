@@ -41,7 +41,6 @@ import accelerate
 
 from transformers import LlamaTokenizer
 from peft import (
-    LoraConfig,
     get_peft_model_state_dict,
     set_peft_model_state_dict,
 )
@@ -50,7 +49,8 @@ from utils.prompter import Prompter
 from bigdl.llm.transformers import AutoModelForCausalLM
 
 # import them from bigdl.llm.transformers.qlora to get a BigDL-LLM compatible Peft model
-from bigdl.llm.transformers.qlora import get_peft_model, prepare_model_for_kbit_training
+from bigdl.llm.transformers.qlora import get_peft_model, prepare_model_for_kbit_training, LoraConfig
+from bigdl.llm.utils.isa_checker import ISAChecker
 
 def get_int_from_env(env_keys, default):
     """Returns the first positive env value found in the `env_keys` list or the default."""
@@ -58,15 +58,7 @@ def get_int_from_env(env_keys, default):
         val = int(os.environ.get(e, -1))
         if val >= 0:
             return val
-    return default
-
-local_rank = get_int_from_env(["LOCAL_RANK","MPI_LOCALRANKID"], "0")
-world_size = get_int_from_env(["WORLD_SIZE","PMI_SIZE"], "1")
-port = get_int_from_env(["MASTER_PORT"], 29500)
-os.environ["LOCAL_RANK"] = str(local_rank)
-os.environ["WORLD_SIZE"] = str(world_size)
-os.environ["RANK"] = str(local_rank)
-os.environ["MASTER_PORT"] = str(port)
+    return int(default)
 
 def train(
     # model/data params
@@ -133,6 +125,7 @@ def train(
             f"wandb_log_model: {wandb_log_model}\n"
             f"resume_from_checkpoint: {resume_from_checkpoint or False}\n"
             f"prompt template: {prompt_template_name}\n"
+            f"gradient_checkpointing: {gradient_checkpointing}\n"
         )
     assert (
         base_model
@@ -142,7 +135,21 @@ def train(
     prompter = Prompter(prompt_template_name)
 
     device_map = "auto"
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    if os.environ.get("LOCAL_POD_NAME", "") != "": # K8S dist
+        pmi_world_size = int(os.environ.get('PMI_SIZE', -1))
+        if pmi_world_size > 0:
+            os.environ['WORLD_SIZE'] = str(pmi_world_size)
+        world_size = 1 if pmi_world_size == 0 else pmi_world_size
+    else: # Standalone (centralized or multi-process)
+        local_rank = get_int_from_env(["LOCAL_RANK","MPI_LOCALRANKID"], "0")
+        world_size = get_int_from_env(["WORLD_SIZE","PMI_SIZE"], "1")
+        port = get_int_from_env(["MASTER_PORT"], 29500)
+        os.environ["LOCAL_RANK"] = str(local_rank)
+        os.environ["WORLD_SIZE"] = str(world_size)
+        os.environ["RANK"] = str(local_rank)
+        os.environ["MASTER_PORT"] = str(port)
+    
+    print(f"world_size: {world_size}")
     ddp = world_size != 1
     if ddp:
         device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
@@ -175,7 +182,6 @@ def train(
             load_in_low_bit="sym_int4", # not support "nf4"
             optimize_model=False,
             torch_dtype=torch.bfloat16,
-            # device_map=device_map,
             modules_to_not_convert=["lm_head"],
         )
     print(f"Model loaded on rank {os.environ.get('LOCAL_RANK')}")
@@ -189,7 +195,7 @@ def train(
         0  # unk. we want this to be different from the eos token
     )
     tokenizer.padding_side = "left"  # Allow batched inference
-    
+
     print(model)
 
     def tokenize(prompt, add_eos_token=True):
@@ -293,6 +299,9 @@ def train(
     else:
         train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
         val_data = None
+
+    isa_checker = ISAChecker()
+    bf16_flag = isa_checker.check_avx512()
     args = transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -303,7 +312,7 @@ def train(
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             lr_scheduler_type="cosine",
-            bf16=True,  # ensure training more stable
+            bf16=bf16_flag,  # ensure training more stable
             logging_steps=1,
             optim="adamw_torch",
             evaluation_strategy="steps" if val_set_size > 0 else "no",
@@ -318,11 +327,9 @@ def train(
             report_to="wandb" if use_wandb else None,
             run_name=wandb_run_name if use_wandb else None,
             gradient_checkpointing=gradient_checkpointing,
+            gradient_checkpointing_kwargs={"use_reentrant": False} if gradient_checkpointing else None,
             ddp_backend="ccl" if ddp else None,
     )
-    if ddp:
-        from accelerate.state import PartialState
-        args.distributed_state = PartialState(cpu=True, backend=args.ddp_backend)
 
     trainer = transformers.Trainer(
         model=model,
@@ -347,3 +354,4 @@ def train(
 
 if __name__ == "__main__":
     fire.Fire(train)
+

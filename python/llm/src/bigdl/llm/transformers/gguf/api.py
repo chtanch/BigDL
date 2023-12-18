@@ -19,7 +19,11 @@ from bigdl.llm.utils.common import invalidInputError
 
 
 qtype_map = {
-    2: "sym_int4"       # q4_0
+    2: "sym_int4",      # q4_0
+    3: "asym_int4",     # q4_1
+    7: "sym_int8",      # q8_0
+    8: "sym_int5",      # q5_0
+    9: "asym_int5",     # q5_1
 }
 
 
@@ -28,6 +32,7 @@ def load_gguf_model(fpath: str, dtype: torch.dtype = torch.float):
 
     loader = GGUFFileLoader(fpath)
     model_family = loader.config["general.architecture"]
+    print("model_family:" + model_family)
     qtype = loader.config["general.file_type"]
 
     invalidInputError(qtype in qtype_map, f"Unsupported gguf quantize type: {qtype}")
@@ -35,10 +40,19 @@ def load_gguf_model(fpath: str, dtype: torch.dtype = torch.float):
 
     with torch.no_grad():
         if model_family == "llama":
-            from .models.llama import load_gguf_llama
+            model_name = loader.config["general.name"].lower()
+            if "mistral" in model_name:
+                from .models.mistral import load_gguf_mistral
+                model, tokenizer = load_gguf_mistral(loader, dtype)
+            else:
+                from .models.llama import load_gguf_llama
 
-            model = load_gguf_llama(loader, dtype)
+                model, tokenizer = load_gguf_llama(loader, dtype)
+        elif model_family == "baichuan":
+            from .models.baichuan import load_gguf_baichuan
+
+            model, tokenizer = load_gguf_baichuan(loader, dtype)
         else:
             invalidInputError(False, f"Unsupported model family: {model_family}")
 
-        return model, low_bit
+        return model, tokenizer, low_bit

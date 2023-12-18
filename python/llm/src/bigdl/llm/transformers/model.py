@@ -124,7 +124,7 @@ class _BaseAutoModelClass:
         if load_in_4bit or load_in_low_bit:
 
             if config_dict.get("quantization_config", None) is not None:
-                from bigdl.llm.transformers.low_bit_linear import get_ggml_qk_size
+                from bigdl.llm.transformers.low_bit_linear import get_block_size
                 q_config = config_dict["quantization_config"]
                 if q_config["quant_method"] == "gptq":
                     invalidInputError(q_config["bits"] == 4,
@@ -136,10 +136,10 @@ class _BaseAutoModelClass:
                                           "You can only load gptq model as aysm_int4 low bit type.")
 
                     load_in_low_bit = "asym_int4"
-                    if int(q_config["group_size"]) % get_ggml_qk_size(load_in_low_bit) != 0:
+                    if int(q_config["group_size"]) % get_block_size(load_in_low_bit) != 0:
                         invalidInputError(False,
                                           (f"group_size must be divisible by "
-                                           f"{get_ggml_qk_size(load_in_low_bit)}."))
+                                           f"{get_block_size(load_in_low_bit)}."))
                     if user_quantization_config is not None:
                         invalidInputError(user_quantization_config.bits == 4,
                                           "Only 4-bit gptq is supported in bigdl-llm.")
@@ -166,10 +166,10 @@ class _BaseAutoModelClass:
 
                     load_in_low_bit = "asym_int4"
 
-                    if int(awq_config.group_size) % get_ggml_qk_size(load_in_low_bit) != 0:
+                    if int(awq_config.group_size) % get_block_size(load_in_low_bit) != 0:
                         invalidInputError(False,
                                           (f"group_size must be divisible by "
-                                           f"{get_ggml_qk_size(load_in_low_bit)}."))
+                                           f"{get_block_size(load_in_low_bit)}."))
 
                     kwargs["quantization_config"] = awq_config
 
@@ -194,21 +194,21 @@ class _BaseAutoModelClass:
     @staticmethod
     def from_gguf(fpath: str, optimize_model: bool = True, cpu_embedding: bool = False):
         """
-        Load a gguf model and convert it to bigdl-llm model
+        Load gguf model and tokenizer and convert it to bigdl-llm model and huggingface tokenzier
 
         :param fpath: Path to gguf model file
         :param optimize_model: Whether to further optimize llm model, defaults to True
         :param cpu_embedding: Whether to replace the Embedding layer, may need to set it
             to `True` when running BigDL-LLM on GPU on Windows, defaults to False
 
-        :return: An optimized bigdl-llm model
+        :return: An optimized bigdl-llm model and a huggingface tokenizer
         """
         from bigdl.llm.optimize import optimize_model as optimize_model_fn
 
-        model, low_bit = load_gguf_model(fpath, dtype=torch.half)
+        model, tokenizer, low_bit = load_gguf_model(fpath, dtype=torch.half)
         model = optimize_model_fn(model, low_bit=low_bit, optimize_llm=optimize_model,
                                   cpu_embedding=cpu_embedding)
-        return model
+        return model, tokenizer
 
     @classmethod
     def load_convert(cls, q_k, optimize_model, *args, **kwargs):

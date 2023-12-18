@@ -74,28 +74,21 @@ def get_ipex_version():
 
 
 def llama_rms_norm_forward(self, hidden_states):
-    optimized_rms_norm = False
     if hidden_states.device.type == "xpu" and not (self.training and hidden_states.requires_grad):
-        if get_ipex_version() <= "2.0.110+xpu":
-            if self.variance_epsilon == 1e-6:
-                hidden_states, _ = torch.ops.torch_ipex.rms_norm(hidden_states,
-                                                                 [self.weight.size(0)],
-                                                                 self.weight)
-                optimized_rms_norm = True
-        else:
-            hidden_states = torch.ops.torch_ipex.fast_rms_norm(hidden_states,
-                                                               [self.weight.size(0)],
-                                                               self.weight,
-                                                               None,
-                                                               self.variance_epsilon)
-            optimized_rms_norm = True
-    if not optimized_rms_norm:
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.to(torch.float32)
-        variance = hidden_states.pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return self.weight * hidden_states.to(input_dtype)
-    return hidden_states
+        import linear_q4_0
+        result = linear_q4_0.fused_rms_norm(hidden_states,
+                                            [self.weight.size(0)],
+                                            self.weight,
+                                            None,
+                                            self.variance_epsilon)
+        # if nelement == 0, means fused norm failed, go back to python implement.
+        if result.nelement != 0:
+            return result
+    input_dtype = hidden_states.dtype
+    hidden_states = hidden_states.to(torch.float32)
+    variance = hidden_states.pow(2).mean(-1, keepdim=True)
+    hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+    return self.weight * hidden_states.to(input_dtype)
 
 
 def llama_attention_forward_4_31(
@@ -220,6 +213,13 @@ def llama_attention_forward_4_31(
                                                      value_states,
                                                      is_causal=True)
         attn_weights = None
+    elif use_esimd_sdp(q_len, self.head_dim, query_states):
+        import linear_fp16_esimd
+        attn_output = linear_fp16_esimd.sdp_forward(query_states,
+                                                    key_states.contiguous(),
+                                                    value_states.contiguous())
+        attn_output = attn_output.view(query_states.shape)
+        attn_weights = None
     else:
         # otherwise, use native attention
         attn_output, attn_weights = native_sdp(query_states, key_states, value_states,
@@ -265,6 +265,32 @@ def check_flash_attention_available(query):
         # may update this later
         return False
     return True
+
+
+def use_esimd_sdp(q_len, head_dim, query_states):
+    if head_dim != 128:
+        # esimd_sdp only support head_dim = 128 now
+        return False
+    elif q_len != 1:
+        # esimd_sdp only support rest token now
+        return False
+    elif query_states.device.type != "xpu":
+        # esimd_sdp only support GPU now
+        return False
+    elif query_states.dtype != torch.float16:
+        # esimd_sdp only has optimization for FP16 now
+        return False
+    else:
+        device_name = torch.xpu.get_device_name(query_states.device.index)
+        if device_name.startswith("Intel(R) Arc(TM) A") or \
+                device_name.startswith("Intel(R) Data Center GPU Flex"):
+            import linear_fp16_esimd
+            if hasattr(linear_fp16_esimd, "sdp_forward"):
+                return True
+            else:
+                return False
+        else:
+            return False
 
 
 def native_sdp(query, key, value, attention_mask,
