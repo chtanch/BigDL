@@ -47,21 +47,29 @@ results = []
 excludes = []
 
 def run_model_in_thread(model, in_out, tokenizer, result, warm_up, num_beams, input_ids, out_len, actual_in_len, num_trials, load_time):
-    for i in range(num_trials + warm_up):
-        st = time.perf_counter()
-        output_ids = model.generate(input_ids, do_sample=False, max_new_tokens=out_len,
-                                    num_beams=num_beams)
-        torch.xpu.synchronize()
-        end = time.perf_counter()
-        output_ids = output_ids.cpu()
-        print("model generate cost: " + str(end - st))
-        output = tokenizer.batch_decode(output_ids)
-        print(output[0])
+    try:
+        for i in range(num_trials + warm_up):
+            st = time.perf_counter()
+            output_ids = model.generate(input_ids, do_sample=False, max_new_tokens=out_len,
+                                        num_beams=num_beams)
+            torch.xpu.synchronize()
+            end = time.perf_counter()
+            output_ids = output_ids.cpu()
+            print("model generate cost: " + str(end - st))
+            output = tokenizer.batch_decode(output_ids)
+            print(output[0][:100])
+            torch.xpu.empty_cache()
+            actual_out_len = output_ids.shape[1] - actual_in_len
+            if i >= warm_up:
+                result[in_out].append([model.first_cost, model.rest_cost_mean, model.encoder_time,
+                                    actual_in_len, actual_out_len, load_time, model.peak_memory])
+    except RuntimeError as error:
+        traceback.print_exc()
+        result[in_out].append([-0.001, -0.001, -0.001, -1, -1, -1, -1])
+        model.to('cpu')
         torch.xpu.empty_cache()
-        actual_out_len = output_ids.shape[1] - actual_in_len
-        if i >= warm_up:
-            result[in_out].append([model.first_cost, model.rest_cost_mean, model.encoder_time,
-                                   actual_in_len, actual_out_len, load_time, model.peak_memory])
+        del model
+        gc.collect()
 
 def run_model(repo_id, test_api, in_out_pairs, local_model_hub=None, warm_up=1, num_trials=3, num_beams=1, low_bit='sym_int4', cpu_embedding=False, batch_size=1, streaming=False):
     # TODO: make a parameter
@@ -1677,7 +1685,8 @@ def run_speculative_gpu(repo_id,
 if __name__ == '__main__':
     from omegaconf import OmegaConf
     conf = OmegaConf.load(f'{current_dir}/config.yaml')
-    today = date.today()
+    import datetime
+    today = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if 'exclude' in conf:
         excludes = conf['exclude']
     streaming = False
@@ -1697,6 +1706,7 @@ if __name__ == '__main__':
                     model_id_input_batch_size = model_id_input + ':' + str(conf['batch_size'])
                     if model_id_input in excludes or model_id_input_batch_size in excludes:
                         in_out_pairs.remove(in_out)
+            print(f'model {model}')
             run_model(model, api, in_out_pairs, conf['local_model_hub'], conf['warm_up'], conf['num_trials'], conf['num_beams'],
                       conf['low_bit'], conf['cpu_embedding'], conf['batch_size'], streaming)
         df = pd.DataFrame(results, columns=['model', '1st token avg latency (ms)', '2+ avg latency (ms/token)', 'encoder time (ms)',
