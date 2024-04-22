@@ -1,6 +1,6 @@
 repo_id:
   - 'Qwen/Qwen-1_8B-Chat'
-local_model_hub: 'C:\chtan\work\aipc\models'
+local_model_hub: ${oc.env:MODEL_HUB_PATH}
 warm_up: 3
 num_trials: 5
 num_beams: 1 # default to greedy search
