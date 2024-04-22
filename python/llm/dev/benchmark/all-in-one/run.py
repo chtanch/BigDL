@@ -1686,7 +1686,7 @@ if __name__ == '__main__':
     streaming = False
     if 'streaming' in conf:
         streaming = conf['streaming']
-
+    sleep_time = conf['sleep_time'] if 'sleep_time' in conf else 0
     
     import pandas as pd
     for api in conf.test_api:
@@ -1700,9 +1700,11 @@ if __name__ == '__main__':
                     model_id_input_batch_size = model_id_input + ':' + str(conf['batch_size'])
                     if model_id_input in excludes or model_id_input_batch_size in excludes:
                         in_out_pairs.remove(in_out)
-            print(f'model {model}')
+            print(f'Running model {model}')
             run_model(model, api, in_out_pairs, conf['local_model_hub'], conf['warm_up'], conf['num_trials'], conf['num_beams'],
                       conf['low_bit'], conf['cpu_embedding'], conf['batch_size'], streaming)
+            print(f'Finished running model {model}. Sleep for {sleep_time} seconds')
+            time.sleep(sleep_time)
         df = pd.DataFrame(results, columns=['model', '1st token avg latency (ms)', '2+ avg latency (ms/token)', 'encoder time (ms)', '1st token avg throughput (token/s)', '2+ avg throughput (token/s)',
                                             'input/output tokens', 'batch_size', 'actual input/output tokens', 'num_beams', 'low_bit', 'cpu_embedding',
                                             'model loading time (s)', 'peak mem (GB)', 'streaming'])
