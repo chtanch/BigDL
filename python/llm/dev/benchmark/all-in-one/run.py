@@ -43,8 +43,79 @@ CHATGLM_IDS = ['THUDM/chatglm-6b', 'THUDM/chatglm2-6b', 'THUDM/chatglm3-6b']
 
 LLAVA_IDS = ['liuhaotian/llava-v1.5-7b']
 
+BERT_IDS = ['google-bert/bert-base-uncased', 'nlpaueb/legal-bert-base-uncased', 'nlpaueb/sec-bert-base']
+
 results = []
 excludes = []
+
+def benchmark_bert(model, tokenizer, num_trials, warm_up, batch_size, load_time):
+    assert batch_size == 1, "batch_size > 1 not handled"
+    result = {}
+    with torch.inference_mode():
+        for in_out in in_out_pairs:
+            try:
+                in_out_len = in_out.split("-")
+                in_len = int(in_out_len[0])
+                out_len = int(in_out_len[1])
+                # As different tokenizer has different encodings,
+                # in_len.txt maybe shorter than we need,
+                # use much longer context to make sure input length
+                test_length = min(in_len*2, 8192)
+                while test_length not in [32, 256, 1024, 2048, 8192]:
+                    test_length = test_length * 2
+                input_str = open(f"prompt/{test_length}.txt", 'r').read()
+                # As different tokenizer has different encodings,
+                # slice the input_ids to ensure the prompt length is required length.
+
+                ## Replace word in input string with [MASK]
+                mask_index = 5
+                words = input_str.split() 
+                words[mask_index] = '[MASK]'
+                input_str = ' '.join(words)
+
+                input_ids = tokenizer.encode(input_str, return_tensors="pt")
+                input_ids = input_ids[:, :in_len-2]  # -2 so that length of input_ids <= in_len
+                true_str = tokenizer.batch_decode(input_ids)[0]
+                input_list = [true_str] * batch_size
+                input_ids = tokenizer(input_list, return_tensors="pt").input_ids.to('xpu')
+                actual_in_len = input_ids.shape[1]
+                result[in_out] = []
+                for i in range(num_trials + warm_up):
+                    st = time.perf_counter()
+                    ## compute logits
+                    logits = model(input_ids).logits
+                    torch.xpu.synchronize()
+                    end = time.perf_counter()
+
+                    logits = logits.cpu()
+                    mask_token_index = (input_ids == tokenizer.mask_token_id)[0].nonzero(as_tuple=True)[0]
+                    output_mask_ids = logits[0, mask_token_index.cpu()].argmax(axis=-1)
+                    output = tokenizer.batch_decode(output_mask_ids)
+                    inference_time = end - st
+                    print(f'model inference time: {inference_time:.4f}s for {actual_in_len} tokens')
+                    print(f'input: {true_str}')
+                    print(f'prediction: {output}')
+
+                    # actual_out_len = logits.shape[1] - actual_in_len
+                    actual_out_len = logits.shape[1]
+                    assert actual_in_len == actual_out_len
+                    mean_token_time = inference_time/actual_in_len
+                    if i >= warm_up:
+                        result[in_out].append([0, mean_token_time, inference_time,
+                                               actual_in_len, actual_out_len, load_time, 0.0])
+                    # torch.xpu.empty_cache() # this may make first token slower
+            except RuntimeError:
+                traceback.print_exc()
+                pass
+            torch.xpu.synchronize()
+            torch.xpu.empty_cache()
+    model.to('cpu')
+    torch.xpu.synchronize()
+    torch.xpu.empty_cache()
+    del model
+    gc.collect()
+    return result
+
 
 def run_model_in_thread(model, in_out, tokenizer, result, warm_up, num_beams, input_ids, out_len, actual_in_len, num_trials, load_time):
     for i in range(num_trials + warm_up):
@@ -92,8 +163,8 @@ def run_model(repo_id, test_api, in_out_pairs, local_model_hub=None, warm_up=1, 
         result = run_transformer_int4_fp16_gpu_win(repo_id, local_model_hub, in_out_pairs, warm_up, num_trials, num_beams, low_bit, cpu_embedding, batch_size, streaming)
     elif test_api == 'transformer_int4_loadlowbit_gpu_win':
         # drop the results of the first time for better performance
-        run_transformer_int4_loadlowbit_gpu_win(repo_id, local_model_hub, in_out_pairs, warm_up, num_trials, num_beams, low_bit, cpu_embedding, batch_size, streaming)
-        result = run_transformer_int4_loadlowbit_gpu_win(repo_id, local_model_hub, in_out_pairs, warm_up, num_trials, num_beams, low_bit, cpu_embedding, batch_size, streaming)
+        # run_transformer_int4_loadlowbit_gpu_win(repo_id, local_model_hub, in_out_pairs, warm_up, num_trials, num_beams, low_bit, cpu_embedding, batch_size, streaming)
+        result = run_transformer_int4_loadlowbit_gpu_win(repo_id, local_model_hub, in_out_pairs, warm_up, num_trials, num_beams, low_bit, cpu_embedding, batch_size, streaming, fp16=True)
     elif test_api == 'transformer_autocast_bf16':
         result = run_transformer_autocast_bf16(repo_id, local_model_hub, in_out_pairs, warm_up, num_trials, num_beams, batch_size)
     elif test_api == 'bigdl_ipex_bf16':
@@ -116,6 +187,7 @@ def run_model(repo_id, test_api, in_out_pairs, local_model_hub=None, warm_up=1, 
             results.append([repo_id,
                             round(np.mean(result[in_out_pair], axis=0)[0]*1000.0, 2),
                             round(np.mean(result[in_out_pair], axis=0)[1]*1000.0, 2),
+                            round(1.0/(np.mean(result[in_out_pair], axis=0)[1]), 2),
                             round(np.mean(result[in_out_pair], axis=0)[2]*1000.0, 2),
                             in_out_pair,
                             batch_size,
@@ -849,6 +921,12 @@ def run_transformer_int4_gpu_win(repo_id,
                                           trust_remote_code=True, use_cache=True, cpu_embedding=cpu_embedding).eval()
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
         model = model.to('xpu')
+    elif repo_id in BERT_IDS:
+        from ipex_llm.transformers import AutoModel, AutoModelForMaskedLM
+        model = AutoModelForMaskedLM.from_pretrained(model_path, optimize_model=True, load_in_low_bit=low_bit,
+                                                     trust_remote_code=True, use_cache=True, cpu_embedding=cpu_embedding).eval()
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        model = model.to('xpu')
     else:
         model = AutoModelForCausalLM.from_pretrained(model_path, optimize_model=True, load_in_low_bit=low_bit,
                                                      trust_remote_code=True, use_cache=True, cpu_embedding=cpu_embedding).eval()
@@ -858,6 +936,9 @@ def run_transformer_int4_gpu_win(repo_id,
     load_time = end - st
     print(">> loading of model costs {}s and {}GB".format(load_time, torch.xpu.memory.memory_reserved()/(1024**3)))
 
+    if repo_id in BERT_IDS:
+        return benchmark_bert(model, tokenizer, num_trials, warm_up, batch_size, load_time)
+    
     model = BenchmarkWrapper(model)
     streamer = TextStreamer(tokenizer, skip_prompt=True)
 
@@ -900,7 +981,7 @@ def run_transformer_int4_gpu_win(repo_id,
                     print("model generate cost: " + str(end - st))
                     output = tokenizer.batch_decode(output_ids)
                     if not streaming:
-                        print(output[0])
+                        print(output[0][:100])
                     actual_out_len = output_ids.shape[1] - actual_in_len
                     if i >= warm_up:
                         result[in_out].append([model.first_cost, model.rest_cost_mean, model.encoder_time,
@@ -957,6 +1038,13 @@ def run_transformer_int4_fp16_gpu_win(repo_id,
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
         model = model.half()
         model = model.to('xpu')
+    elif repo_id in BERT_IDS:
+        from ipex_llm.transformers import AutoModel, AutoModelForMaskedLM
+        model = AutoModelForMaskedLM.from_pretrained(model_path, optimize_model=True, load_in_low_bit=low_bit,
+                                                     trust_remote_code=True, use_cache=True, cpu_embedding=cpu_embedding).eval()
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        model = model.half()
+        model = model.to('xpu')
     else:
         model = AutoModelForCausalLM.from_pretrained(model_path, optimize_model=True, load_in_low_bit=low_bit,
                                                      trust_remote_code=True, use_cache=True, cpu_embedding=cpu_embedding).eval()
@@ -966,6 +1054,9 @@ def run_transformer_int4_fp16_gpu_win(repo_id,
     end = time.perf_counter()
     load_time = end - st
     print(">> loading of model costs {}s and {}GB".format(load_time, torch.xpu.memory.memory_reserved()/(1024**3)))
+
+    if repo_id in BERT_IDS:
+        return benchmark_bert(model, tokenizer, num_trials, warm_up, batch_size, load_time)
 
     model = BenchmarkWrapper(model)
     streamer = TextStreamer(tokenizer, skip_prompt=True)
@@ -1009,7 +1100,7 @@ def run_transformer_int4_fp16_gpu_win(repo_id,
                     print("model generate cost: " + str(end - st))
                     output = tokenizer.batch_decode(output_ids)
                     if not streaming:
-                        print(output[0])
+                        print(output[0][:100])
                     actual_out_len = output_ids.shape[1] - actual_in_len
                     if i >= warm_up:
                         result[in_out].append([model.first_cost, model.rest_cost_mean, model.encoder_time,
@@ -1037,11 +1128,14 @@ def run_transformer_int4_loadlowbit_gpu_win(repo_id,
                                             low_bit,
                                             cpu_embedding,
                                             batch_size,
-                                            streaming):
+                                            streaming,
+                                            fp16):
     from ipex_llm.transformers import AutoModel, AutoModelForCausalLM
     from transformers import AutoTokenizer, GPTJForCausalLM, LlamaTokenizer, TextStreamer
     import intel_extension_for_pytorch as ipex
-    model_path = get_model_path(repo_id, local_model_hub)
+    # model_path = get_model_path(repo_id, local_model_hub)
+    repo_model_name = repo_id.split("/")[1]
+    model_path = os.path.join(local_model_hub, repo_model_name)
     # Load BigDL-LLM optimized low bit model
     st = time.perf_counter()
     if repo_id in CHATGLM_IDS:
@@ -1067,6 +1161,8 @@ def run_transformer_int4_loadlowbit_gpu_win(repo_id,
                                                   use_cache=True, cpu_embedding=cpu_embedding).eval()
         tokenizer = AutoTokenizer.from_pretrained(model_path+'-'+low_bit, trust_remote_code=True)
         model = model.to('xpu')
+    if fp16:
+        model = model.half()
     end = time.perf_counter()
     load_time = end - st
     print(">> loading of model costs {}s and {}GB".format(load_time, torch.xpu.memory.memory_reserved()/(1024**3)))
@@ -1113,7 +1209,7 @@ def run_transformer_int4_loadlowbit_gpu_win(repo_id,
                     print("model generate cost: " + str(end - st))
                     output = tokenizer.batch_decode(output_ids)
                     if not streaming:
-                        print(output[0])
+                        print(output[0][:100])
                     actual_out_len = output_ids.shape[1] - actual_in_len
                     if i >= warm_up:
                         result[in_out].append([model.first_cost, model.rest_cost_mean, model.encoder_time,
@@ -1806,7 +1902,8 @@ def run_pipeline_parallel_gpu(repo_id,
 if __name__ == '__main__':
     from omegaconf import OmegaConf
     conf = OmegaConf.load(f'{current_dir}/config.yaml')
-    today = date.today()
+    import datetime
+    today = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if 'exclude' in conf:
         excludes = conf['exclude']
     streaming = False
@@ -1818,6 +1915,7 @@ if __name__ == '__main__':
         use_fp16_torch_dtype = conf['use_fp16_torch_dtype']
     if 'n_gpu' in conf:
         n_gpu = conf['n_gpu']
+    sleep_time = conf['sleep_time'] if 'sleep_time' in conf else 0
     
     import pandas as pd
     for api in conf.test_api:
@@ -1831,9 +1929,12 @@ if __name__ == '__main__':
                     model_id_input_batch_size = model_id_input + ':' + str(conf['batch_size'])
                     if model_id_input in excludes or model_id_input_batch_size in excludes:
                         in_out_pairs.remove(in_out)
+            print(f'Running model {model}')
             run_model(model, api, in_out_pairs, conf['local_model_hub'], conf['warm_up'], conf['num_trials'], conf['num_beams'],
                       conf['low_bit'], conf['cpu_embedding'], conf['batch_size'], streaming, use_fp16_torch_dtype, n_gpu)
-        df = pd.DataFrame(results, columns=['model', '1st token avg latency (ms)', '2+ avg latency (ms/token)', 'encoder time (ms)',
+            print(f'Finished running model {model}. Sleep for {sleep_time} seconds')
+            time.sleep(sleep_time)
+        df = pd.DataFrame(results, columns=['model', '1st token avg latency (ms)', '2+ avg latency (ms/token)', '2+ avg throughput (token/s)', 'encoder time (ms)',
                                             'input/output tokens', 'batch_size', 'actual input/output tokens', 'num_beams', 'low_bit', 'cpu_embedding',
                                             'model loading time (s)', 'peak mem (GB)', 'streaming', 'use_fp16_torch_dtype'])
         df.to_csv(csv_name)

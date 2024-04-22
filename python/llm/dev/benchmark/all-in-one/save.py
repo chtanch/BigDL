@@ -25,6 +25,8 @@ import gc
 
 from run import LLAMA_IDS, CHATGLM_IDS, LLAVA_IDS, get_model_path
 
+# OUTPUT_MODEL_PATH = 'D:\\'   # uncomment this to save models to this folder
+
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 def save_model_in_low_bit(repo_id,
@@ -58,6 +60,11 @@ def save_model_in_low_bit(repo_id,
     end = time.perf_counter()
     print(">> loading of and converting of model costs {}s".format(end - st))
 
+    if 'OUTPUT_MODEL_PATH' in globals():
+        model_name = os.path.split(model_path)[-1]
+        model_path = os.path.join(OUTPUT_MODEL_PATH, model_name)
+
+    print(f">> Saving model to {model_path}")
     model.save_low_bit(model_path+'-'+low_bit)
     tokenizer.save_pretrained(model_path+'-'+low_bit)
 
