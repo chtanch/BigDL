@@ -20,12 +20,12 @@ set SYCL_CACHE_PERSISTENT=1
 set BIGDL_LLM_XMX_DISABLED=1
 
 @REM transformers==4.31.0
-python -m pip install transformers==4.31.0
-copy config_431.yaml ..\python\llm\dev\benchmark\all-in-one\config.yaml
-cd ..\python\llm\dev\benchmark\all-in-one
-python run.py
-move *.csv "%OUTPUT_DIR%"
-cd %CWD%
+@REM python -m pip install transformers==4.31.0
+@REM copy config_431.yaml ..\python\llm\dev\benchmark\all-in-one\config.yaml
+@REM cd ..\python\llm\dev\benchmark\all-in-one
+@REM python run.py
+@REM move *.csv "%OUTPUT_DIR%"
+@REM cd %CWD%
 
 @REM transformers==4.34.0
 python -m pip install transformers==4.34.0
@@ -44,4 +44,4 @@ move *.csv "%OUTPUT_DIR%"
 cd %CWD%
 
 @REM concatenate all csv files
-@REM python concat_csv.py -i "%OUTPUT_DIR%"
+python concat_csv.py -i "%OUTPUT_DIR%"
