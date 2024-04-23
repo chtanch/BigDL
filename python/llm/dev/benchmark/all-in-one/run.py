@@ -114,9 +114,8 @@ def run_model(repo_id, test_api, in_out_pairs, local_model_hub=None, warm_up=1, 
             results.append([repo_id,
                             round(np.mean(result[in_out_pair], axis=0)[0]*1000.0, 2),
                             round(np.mean(result[in_out_pair], axis=0)[1]*1000.0, 2),
+                            round(1.0/(np.mean(result[in_out_pair], axis=0)[1]), 2),
                             round(np.mean(result[in_out_pair], axis=0)[2]*1000.0, 2),
-                            round(np.mean(1.0/np.array(result[in_out_pair])[:, 0]), 2),
-                            round(np.mean(1.0/np.array(result[in_out_pair])[:, 1]), 2),
                             in_out_pair,
                             batch_size,
                             f'{int(np.mean(result[in_out_pair], axis=0)[3])}' +
@@ -1705,7 +1704,7 @@ if __name__ == '__main__':
                       conf['low_bit'], conf['cpu_embedding'], conf['batch_size'], streaming)
             print(f'Finished running model {model}. Sleep for {sleep_time} seconds')
             time.sleep(sleep_time)
-        df = pd.DataFrame(results, columns=['model', '1st token avg latency (ms)', '2+ avg latency (ms/token)', 'encoder time (ms)', '1st token avg throughput (token/s)', '2+ avg throughput (token/s)',
+        df = pd.DataFrame(results, columns=['model', '1st token avg latency (ms)', '2+ avg latency (ms/token)', '2+ avg throughput (token/s)', 'encoder time (ms)',
                                             'input/output tokens', 'batch_size', 'actual input/output tokens', 'num_beams', 'low_bit', 'cpu_embedding',
                                             'model loading time (s)', 'peak mem (GB)', 'streaming'])
         df.to_csv(csv_name)
