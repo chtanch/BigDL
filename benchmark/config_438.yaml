@@ -1,8 +1,12 @@
 repo_id:
+  - 'google/gemma-2b'
+  # - 'google/gemma-7b'
+  - 'cognitivecomputations/dolphin-2.6-mistral-7b'
+  # - 'google/codegemma-7b'
+  - 'microsoft/phi-2'
   - 'Qwen/Qwen1.5-4B-Chat'
-  - '01-ai/Yi-6B-Chat'
-local_model_hub: ${oc.env:MODEL_HUB_PATH}
-warm_up: 3
+local_model_hub: 'C:\aipc\models'
+warm_up: 1
 num_trials: 3
 num_beams: 1 # default to greedy search
 low_bit: 'sym_int4' # default to use 'sym_int4' (i.e. symmetric int4)
@@ -11,5 +15,5 @@ in_out_pairs:
   - '1024-128'
 test_api:
   - "transformer_int4_gpu_win" # on Intel GPU for Windows (catch GPU peak memory)
-cpu_embedding: True # whether put embedding to CPU (only avaiable now for gpu win related test_api)
+cpu_embedding: False # whether put embedding to CPU (only avaiable now for gpu win related test_api)
 sleep_time: 10

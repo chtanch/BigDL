@@ -1,10 +1,15 @@
 repo_id:
-  - 'mistralai/Mistral-7B-v0.1'
+  # - 'mistralai/Mistral-7B-Instruct-v0.2'
   - 'meta-llama/Llama-2-7b-chat-hf'
+  # - 'meta-llama/Meta-Llama-3-8B'
+  - '01-ai/Yi-6B-Chat'
+  - 'tiiuae/falcon-7b-instruct'
+  - 'lmsys/vicuna-7b-v1.5'
   - 'codellama/CodeLlama-7b-hf'
-  - 'deepseek-ai/deepseek-coder-6.7b-instruct'
-local_model_hub: ${oc.env:MODEL_HUB_PATH}
-warm_up: 3
+  - 'deepseek-ai/deepseek-coder-7b-instruct-v1.5'
+  - 'ise-uiuc/Magicoder-S-DS-6.7B' 
+local_model_hub: 'C:\aipc\models'
+warm_up: 1
 num_trials: 3
 num_beams: 1 # default to greedy search
 low_bit: 'sym_int4' # default to use 'sym_int4' (i.e. symmetric int4)
@@ -13,5 +18,5 @@ in_out_pairs:
   - '1024-128'
 test_api:
   - "transformer_int4_gpu_win" # on Intel GPU for Windows (catch GPU peak memory)
-cpu_embedding: True # whether put embedding to CPU (only avaiable now for gpu win related test_api)
+cpu_embedding: False # whether put embedding to CPU (only avaiable now for gpu win related test_api)
 sleep_time: 10

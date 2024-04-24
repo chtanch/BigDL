@@ -18,6 +18,8 @@ cd %CWD%
 @REM set environment variables
 set SYCL_CACHE_PERSISTENT=1
 set BIGDL_LLM_XMX_DISABLED=1
+set IPEX_LLM_QUANTIZE_KV_CACHE=1
+copy run-mtl.bat "%OUTPUT_DIR%"
 
 @REM transformers==4.31.0
 @REM python -m pip install transformers==4.31.0
@@ -29,15 +31,19 @@ set BIGDL_LLM_XMX_DISABLED=1
 
 @REM transformers==4.34.0
 python -m pip install transformers==4.34.0
+pip list > "%OUTPUT_DIR%\config_434_requirements.txt"
 copy config_434.yaml ..\python\llm\dev\benchmark\all-in-one\config.yaml
+copy config_434.yaml "%OUTPUT_DIR%"
 cd ..\python\llm\dev\benchmark\all-in-one
 python run.py
 move *.csv "%OUTPUT_DIR%"
 cd %CWD%
 
-@REM transformers==4.37.0
-python -m pip install transformers==4.37.0
-copy config_437.yaml ..\python\llm\dev\benchmark\all-in-one\config.yaml
+@REM transformers==4.38.0
+python -m pip install transformers==4.38.0
+pip list > "%OUTPUT_DIR%\config_438_requirements.txt"
+copy config_438.yaml ..\python\llm\dev\benchmark\all-in-one\config.yaml
+copy config_438.yaml "%OUTPUT_DIR%"
 cd ..\python\llm\dev\benchmark\all-in-one
 python run.py
 move *.csv "%OUTPUT_DIR%"
