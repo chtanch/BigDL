@@ -3,7 +3,7 @@
 
 defaults:
   - _self_
-  - /transformers: "t_4.34"   # default yaml to load under configs/transformers/
+  - /transformers: "transformers_4.34"   # default yaml to load under configs/transformers/
 
 # hydra:
 #   run:
