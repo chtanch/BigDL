@@ -1,0 +1,9 @@
+# @package _global_
+
+repo_id:
+  - 'google/gemma-2b'
+  - 'google/gemma-7b'
+  - 'cognitivecomputations/dolphin-2.6-mistral-7b'
+  - 'google/codegemma-7b'
+  - 'microsoft/phi-2'
+  - 'Qwen/Qwen1.5-4B-Chat'

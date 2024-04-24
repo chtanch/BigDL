@@ -1675,13 +1675,15 @@ def run_speculative_gpu(repo_id,
     return result
 
 
-if __name__ == '__main__':
-    from omegaconf import OmegaConf
-    conf = OmegaConf.load(f'{current_dir}/config.yaml')
+import hydra
+@hydra.main(version_base="1.2", config_path="configs", config_name="config")
+def main(cfg):
+    conf = cfg
+    # print(f"Output directory  : {hydra.core.hydra_config.HydraConfig.get().runtime.output_dir}")
+
     import datetime
     today = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    if 'exclude' in conf:
-        excludes = conf['exclude']
+    excludes = conf['exclude'] if 'exclude' in conf else []
     streaming = False
     if 'streaming' in conf:
         streaming = conf['streaming']
@@ -1689,7 +1691,7 @@ if __name__ == '__main__':
     
     import pandas as pd
     for api in conf.test_api:
-        global csv_name
+        global csv_name, results
         csv_name = f'{current_dir}/{api}-results-{today}.csv'
         for model in conf.repo_id:
             in_out_pairs = conf['in_out_pairs'].copy()
@@ -1709,3 +1711,6 @@ if __name__ == '__main__':
                                             'model loading time (s)', 'peak mem (GB)', 'streaming'])
         df.to_csv(csv_name)
         results = []
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,4 @@
+# @package _global_
+
+repo_id:
+  - 'bigcode/starcoder2-3b'

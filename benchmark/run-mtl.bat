@@ -7,19 +7,14 @@ set CWD=%cd%
 set OUTPUT_DIR=%cd%\results\%date:~10,4%-%date:~4,2%-%date:~7,2%_%time:~0,2%-%time:~3,2%-%time:~6,2%
 mkdir "%OUTPUT_DIR%"
 
-@REM Ensure no csv files in all-in-one folder
-cd ..\python\llm\dev\benchmark\all-in-one
-if exist *.csv (
-    echo csv file exists. Stopping.
-    exit /b 1
-)
-cd %CWD%
-
 @REM set environment variables
 set SYCL_CACHE_PERSISTENT=1
 set BIGDL_LLM_XMX_DISABLED=1
 set IPEX_LLM_QUANTIZE_KV_CACHE=1
-copy run-mtl.bat "%OUTPUT_DIR%"
+@REM copy run-mtl.bat "%OUTPUT_DIR%"
+
+for *.yaml in configs folder
+    file = .yaml
 
 @REM transformers==4.31.0
 @REM python -m pip install transformers==4.31.0
@@ -35,19 +30,19 @@ pip list > "%OUTPUT_DIR%\config_434_requirements.txt"
 copy config_434.yaml ..\python\llm\dev\benchmark\all-in-one\config.yaml
 copy config_434.yaml "%OUTPUT_DIR%"
 cd ..\python\llm\dev\benchmark\all-in-one
-python run.py
+python run.py --config-path "..\\..\\..\\..\\..\\benchmark\\configs" "config-name" "default" "transformers=4.34"
 move *.csv "%OUTPUT_DIR%"
 cd %CWD%
 
-@REM transformers==4.38.0
-python -m pip install transformers==4.38.0
-pip list > "%OUTPUT_DIR%\config_438_requirements.txt"
-copy config_438.yaml ..\python\llm\dev\benchmark\all-in-one\config.yaml
-copy config_438.yaml "%OUTPUT_DIR%"
-cd ..\python\llm\dev\benchmark\all-in-one
-python run.py
-move *.csv "%OUTPUT_DIR%"
-cd %CWD%
+@REM @REM transformers==4.38.0
+@REM python -m pip install transformers==4.38.0
+@REM pip list > "%OUTPUT_DIR%\config_438_requirements.txt"
+@REM copy config_438.yaml ..\python\llm\dev\benchmark\all-in-one\config.yaml
+@REM copy config_438.yaml "%OUTPUT_DIR%"
+@REM cd ..\python\llm\dev\benchmark\all-in-one
+@REM python run.py
+@REM move *.csv "%OUTPUT_DIR%"
+@REM cd %CWD%
 
-@REM concatenate all csv files
-python concat_csv.py -i "%OUTPUT_DIR%"
+@REM @REM concatenate all csv files
+@REM python concat_csv.py -i "%OUTPUT_DIR%"
