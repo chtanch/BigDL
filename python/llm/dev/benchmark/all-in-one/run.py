@@ -1142,12 +1142,10 @@ def run_transformer_int4_loadlowbit_gpu_win(repo_id,
         model = AutoModel.load_low_bit(model_path+'-'+low_bit, optimize_model=True, trust_remote_code=True,
                                        use_cache=True, cpu_embedding=cpu_embedding).eval()
         tokenizer = AutoTokenizer.from_pretrained(model_path+'-'+low_bit, trust_remote_code=True)
-        model = model.to('xpu')
     elif repo_id in LLAMA_IDS:
         model = AutoModelForCausalLM.load_low_bit(model_path+'-'+low_bit, optimize_model=True, trust_remote_code=True,
                                                   use_cache=True, cpu_embedding=cpu_embedding).eval()
         tokenizer = LlamaTokenizer.from_pretrained(model_path+'-'+low_bit, trust_remote_code=True)
-        model = model.to('xpu')
     elif repo_id in LLAVA_IDS:
         llava_repo_dir = os.environ.get('LLAVA_REPO_DIR')
         sys.path.append(rf"{llava_repo_dir}")
@@ -1155,14 +1153,14 @@ def run_transformer_int4_loadlowbit_gpu_win(repo_id,
         model = AutoModelForCausalLM.load_low_bit(model_path+'-'+low_bit, optimize_model=True, trust_remote_code=True,
                                                   use_cache=True, cpu_embedding=cpu_embedding).eval()
         tokenizer = AutoTokenizer.from_pretrained(model_path+'-'+low_bit, trust_remote_code=True)
-        model = model.to('xpu')
     else:
         model = AutoModelForCausalLM.load_low_bit(model_path+'-'+low_bit, optimize_model=True, trust_remote_code=True,
                                                   use_cache=True, cpu_embedding=cpu_embedding).eval()
         tokenizer = AutoTokenizer.from_pretrained(model_path+'-'+low_bit, trust_remote_code=True)
-        model = model.to('xpu')
     if fp16:
         model = model.half()
+        print("Convert model to half precision")
+    model = model.to('xpu')
     end = time.perf_counter()
     load_time = end - st
     print(">> loading of model costs {}s and {}GB".format(load_time, torch.xpu.memory.memory_reserved()/(1024**3)))
