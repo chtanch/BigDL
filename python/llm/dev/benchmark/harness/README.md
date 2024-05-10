@@ -22,6 +22,14 @@ python run_llb.py --model ipex-llm --pretrained /path/to/model --precision nf3 s
 ```python
 python run_llb.py --model ipex-llm --pretrained /path/to/model --precision nf3 sym_int4 nf4 --device xpu --tasks hellaswag arc mmlu truthfulqa --batch 1 --no_cache
 ```
+
+### Evaluation on Intel GPU using pre-quantized models with load_low_bit API 
+`--pretrained` should point to ipex-llm pre-quantized model. Set `--precision` to `llb_sym_int4`. The precision applied is determined by the quantized model; the precision value here will not take effect.
+
+```python
+python run_llb.py --model ipex-llm --pretrained /path/to/model --precision llb_sym_int4 --device xpu --tasks winogrande --batch 1 --no_cache
+```
+
 ### Evaluation using multiple Intel GPU
 ```python
 python run_multi_llb.py --model ipex-llm --pretrained /path/to/model --precision nf3 sym_int4 nf4 --device xpu:0,2,3 --tasks hellaswag arc mmlu truthfulqa --batch 1 --no_cache

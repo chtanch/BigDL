@@ -41,6 +41,7 @@ class IPEXLLM(AutoCausalLM):
     def __init__(self, *args, **kwargs):
         if 'device' in kwargs and 'xpu' in kwargs['device']:
             import intel_extension_for_pytorch
+        load_low_bit = ('load_in_low_bit' in kwargs and kwargs['load_in_low_bit'][:3] == 'llb')
         self.bigdl_llm_kwargs = {}
         keys = list(kwargs.keys())
         for k in keys:
@@ -49,10 +50,23 @@ class IPEXLLM(AutoCausalLM):
 
         self.bigdl_llm_kwargs['use_cache'] = self.bigdl_llm_kwargs.get('use_cache', True)
         self.bigdl_llm_kwargs['optimize_model'] = self.bigdl_llm_kwargs.get('optimize_model', True)
-        AutoModelForCausalLM.from_pretrained = partial(AutoModelForCausalLM.from_pretrained, **self.bigdl_llm_kwargs)
-        
+
+        if load_low_bit:
+            class ModifiedAutoModelForCausalLM(AutoModelForCausalLM):
+                @classmethod
+                def load_low_bit(cls, *args, **kwargs):
+                    for k in ['load_in_low_bit', 'device_map', 'max_memory', 'load_in_8bit', 'load_in_4bit']:
+                        kwargs.pop(k)
+                    return super().load_low_bit(*args, **kwargs)
+
+            AutoModelForCausalLM.from_pretrained = partial(ModifiedAutoModelForCausalLM.load_low_bit, **self.bigdl_llm_kwargs)
+
+        else:
+            AutoModelForCausalLM.from_pretrained = partial(AutoModelForCausalLM.from_pretrained, **self.bigdl_llm_kwargs)
+
         kwargs['trust_remote_code'] = kwargs.get('trust_remote_code', True)
         super().__init__(*args, **kwargs)
+        self.model.half()
 
     @property
     def add_special_tokens(self) -> bool:
